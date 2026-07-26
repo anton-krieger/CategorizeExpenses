@@ -1,2 +1,2 @@
-# No third-party dependencies required – uses Python standard library only.
-# Python 3.10+ is required (uses the X | Y union type hint syntax).
+streamlit>=1.60
+pandas>=2.2

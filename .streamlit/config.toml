@@ -1,0 +1,18 @@
+[server]
+# Security: only ever listen on localhost. Do not change this to 0.0.0.0 —
+# this app displays private financial data and must never be reachable
+# from the local network or internet.
+address = "127.0.0.1"
+headless = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#4C6EF5"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F3F5"
+textColor = "#1A1A1A"
+font = "sans serif"

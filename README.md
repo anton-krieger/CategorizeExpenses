@@ -1,78 +1,51 @@
 # CategorizeExpenses
 
-An interactive command-line tool to manually categorize expenses from a private CSV file.
-Your financial data stays local and is protected from accidental commits via `.gitignore`.
+An interactive local web app to browse, search, and tag expenses from a private
+bank-export CSV. Your financial data stays local: it's read from `data/` (gitignored)
+and the app only ever listens on `127.0.0.1` — never on the network or internet.
 
 ## Requirements
 
 - Python 3.10+
-- No third-party packages needed (standard library only)
+- `streamlit`, `pandas` (see `requirements.txt`)
 
 ## Quick start
 
 ```bash
-# 1. Place your expense CSV in the data/ directory
+# 1. Place your bank export CSV in the data/ directory
 #    (data/ is gitignored – your data stays private)
 mkdir -p data
-cp /path/to/my_expenses.csv data/
+cp /path/to/my_export.csv data/
 
-# 2. Run the categorizer
-python categorize.py data/my_expenses.csv
+# 2. Create a virtual environment and install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-# 3. The categorized output is saved automatically to
-#    data/categorized_my_expenses.csv
+# 3. Run the app
+streamlit run app.py
 ```
 
-## Usage
-
-```
-python categorize.py <input.csv> [options]
-
-positional arguments:
-  input                 Path to the input CSV file
-
-options:
-  --output <path>       Output CSV path
-                        (default: data/categorized_<input filename>)
-  --categories <list>   Comma-separated category names
-                        (overrides the built-in list)
-  --date-col <name>     Column name for the date   (default: Date)
-  --desc-col <name>     Column name for description (default: Description)
-  --amount-col <name>   Column name for the amount  (default: Amount)
-  --redo                Re-categorize rows that already have a category
-```
+This opens `http://127.0.0.1:8501` in your browser. The bundled
+`.streamlit/config.toml` pins the server to localhost — do not override this
+with `--server.address` when running the app.
 
 ## How it works
 
-1. Each expense row is displayed with its date, description, and amount.
-2. You pick a category by entering its number or the first letters of its name.
-3. Enter **s** to skip a row, or **q** to save and quit at any time.
-4. Progress is saved after every session – already-categorized rows are skipped
-   on the next run unless `--redo` is passed.
+- **Filter column** – switch between all entries and entries with no tags yet,
+  or select one or more tags to filter by.
+- **Entries column** – type to search names/purposes, sort by date or price,
+  bulk-select rows (or select all/clear in the current view), and apply
+  existing or newly created tags to the selection. New tags get a random
+  color the first time they're created.
+- **Stats column** – income, expense, and net totals, plus per-year and
+  per-month breakdowns, all computed on the currently filtered + searched view.
 
-## Built-in categories
+## Data & privacy
 
-Groceries, Dining, Transport, Housing, Utilities, Health, Entertainment,
-Shopping, Travel, Income, Other
+- `data/` is entirely gitignored — your source CSV and all derived files stay local.
+- The app never modifies your source CSV. It only writes two files:
+  - `data/tags.json` – tag name → color definitions
+  - `data/tagged_entries.csv` – entry id → tags (the only file that changes as you work)
+- The app makes no external network calls and only binds to `127.0.0.1`.
 
-Override them with `--categories "Food,Rent,Fun,Salary"`.
-
-## Input CSV format
-
-The CSV must have a header row. The default expected column names are
-`Date`, `Description`, and `Amount`. Use `--date-col`, `--desc-col`, and
-`--amount-col` to map different column names.
-
-Example:
-
-```csv
-Date,Description,Amount
-2024-01-03,Supermarket XYZ,-52.40
-2024-01-04,Monthly rent,-900.00
-2024-01-05,Salary,3000.00
-```
-
-## Privacy
-
-- `data/` and `*.csv` are listed in `.gitignore` – they will never be committed.
-- Keep your source CSV and the categorized output inside `data/`.
