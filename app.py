@@ -21,6 +21,8 @@ import hashlib
 import json
 import os
 import random
+import re
+from collections import Counter
 
 import pandas as pd
 import streamlit as st
@@ -118,6 +120,17 @@ def random_tag_color() -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def top_words(df_subset: pd.DataFrame, top_n: int = 80) -> list[str]:
+    """Most frequent words across the name and purpose fields, for search inspiration."""
+    stopwords = {
+        "bei", "ihr", "ihre", "der", "die", "das", "und", "von", "fur", "für",
+        "mit", "den", "des", "dem", "auf", "im", "zu", "am", "aus", "fuer",
+    }
+    text = " ".join(df_subset[NAME_COL].fillna("")) + " " + " ".join(df_subset[PURPOSE_COL].fillna(""))
+    tokens = [t for t in re.findall(r"[a-zA-ZäöüÄÖÜß]+", text.lower()) if len(t) >= 3 and t not in stopwords]
+    return [word for word, _ in Counter(tokens).most_common(top_n)]
+
+
 def tag_badges_html(tag_names: list[str], tag_defs: dict) -> str:
     return " ".join(
         f'<span style="background:{tag_defs.get(t, "#888")};padding:2px 8px;'
@@ -171,6 +184,11 @@ filtered = df[df["entry_id"].apply(matches_filter)]
 # ---------- Column 2: search + table + tag editor ----------
 with col2:
     st.subheader("Entries")
+
+    st.caption("Top words in names & purposes (current tag filter) — for search inspiration")
+    with st.container(height=100, border=True):
+        st.write(" ".join(top_words(filtered)) or "—")
+
     query = st.text_input("Search name / purpose").strip().lower()
     if query:
         mask = (
