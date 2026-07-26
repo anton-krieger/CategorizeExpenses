@@ -1,0 +1,11 @@
+# Private data – keep all CSV files and output out of version control
+data/
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
