@@ -149,8 +149,12 @@ if "tag_defs" not in st.session_state:
     st.session_state.tag_defs = load_tag_defs()
 if "entry_tags" not in st.session_state:
     st.session_state.entry_tags = load_entry_tags()
-if "selected_ids" not in st.session_state:
-    st.session_state.selected_ids = set()
+if "editor_nonce" not in st.session_state:
+    st.session_state.editor_nonce = 0
+if "select_default" not in st.session_state:
+    st.session_state.select_default = False
+if "last_view_sig" not in st.session_state:
+    st.session_state.last_view_sig = None
 
 df = load_source(source_path)
 
@@ -207,18 +211,29 @@ with col2:
 
     filtered_ids = filtered["entry_id"].tolist()
 
+    # Selection is scoped to the current view. Whenever the view changes
+    # (tag filter, no-tag mode, search text, or sort), reset the selection so
+    # stale rows from a previous search can never be tagged by accident.
+    view_sig = (view_mode, tuple(sorted(selected_tag_filter)), query, sort_by, ascending)
+    if view_sig != st.session_state.last_view_sig:
+        st.session_state.last_view_sig = view_sig
+        st.session_state.select_default = False
+        st.session_state.editor_nonce += 1
+
     btn_col1, btn_col2 = st.columns(2)
     with btn_col1:
         if st.button("Select all in view"):
-            st.session_state.selected_ids.update(filtered_ids)
+            st.session_state.select_default = True
+            st.session_state.editor_nonce += 1
             st.rerun()
     with btn_col2:
         if st.button("Clear selection"):
-            st.session_state.selected_ids.difference_update(filtered_ids)
+            st.session_state.select_default = False
+            st.session_state.editor_nonce += 1
             st.rerun()
 
     display_df = filtered[["entry_id", DATE_COL, NAME_COL, PURPOSE_COL, "amount_num"]].copy()
-    display_df.insert(0, "select", display_df["entry_id"].isin(st.session_state.selected_ids))
+    display_df.insert(0, "select", st.session_state.select_default)
     display_df["tags"] = display_df["entry_id"].map(lambda eid: ", ".join(st.session_state.entry_tags.get(eid, [])))
     display_df = display_df.rename(columns={DATE_COL: "Date", NAME_COL: "Name", PURPOSE_COL: "Purpose", "amount_num": "Price"})
 
@@ -230,19 +245,12 @@ with col2:
             "entry_id": None,
             "Price": st.column_config.NumberColumn(format="%.2f €"),
         },
-        key="entries_editor",
+        key=f"entries_editor_{st.session_state.editor_nonce}",
         width="stretch",
     )
 
-    # Sync checkbox edits for currently visible rows back into persistent selection.
-    for _, row in edited.iterrows():
-        if row["select"]:
-            st.session_state.selected_ids.add(row["entry_id"])
-        else:
-            st.session_state.selected_ids.discard(row["entry_id"])
-
-    selected_ids = [eid for eid in filtered_ids if eid in st.session_state.selected_ids]
-    st.caption(f"{len(st.session_state.selected_ids)} selected in total ({len(selected_ids)} in current view)")
+    selected_ids = edited.loc[edited["select"], "entry_id"].tolist()
+    st.caption(f"{len(selected_ids)} selected in current view")
 
     st.markdown("**Apply tags to selection**")
     apply_col1, apply_col2 = st.columns(2)
@@ -251,7 +259,7 @@ with col2:
     with apply_col2:
         new_tag_name = st.text_input("New tag name")
 
-    if st.button("Apply to selected", disabled=not st.session_state.selected_ids):
+    if st.button("Apply to selected", disabled=not selected_ids):
         tags_to_apply = list(existing_choice)
         new_tag_name = new_tag_name.strip()
         if new_tag_name:
@@ -261,12 +269,15 @@ with col2:
             tags_to_apply.append(new_tag_name)
 
         if tags_to_apply:
-            for eid in st.session_state.selected_ids:
+            for eid in selected_ids:
                 current = set(st.session_state.entry_tags.get(eid, []))
                 current.update(tags_to_apply)
                 st.session_state.entry_tags[eid] = sorted(current)
             save_entry_tags(st.session_state.entry_tags)
-            st.success(f"Applied {tags_to_apply} to {len(st.session_state.selected_ids)} entries")
+            # Reset the selection after tagging so the next action starts clean.
+            st.session_state.select_default = False
+            st.session_state.editor_nonce += 1
+            st.success(f"Applied {tags_to_apply} to {len(selected_ids)} entries")
             st.rerun()
         else:
             st.warning("Pick at least one existing tag or type a new tag name.")
