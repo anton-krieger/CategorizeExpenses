@@ -155,6 +155,12 @@ if "select_default" not in st.session_state:
     st.session_state.select_default = False
 if "last_view_sig" not in st.session_state:
     st.session_state.last_view_sig = None
+if "review_nonce" not in st.session_state:
+    st.session_state.review_nonce = 0
+if "last_review_tag" not in st.session_state:
+    st.session_state.last_review_tag = None
+if "review_select_default" not in st.session_state:
+    st.session_state.review_select_default = False
 
 df = load_source(source_path)
 
@@ -300,3 +306,132 @@ with col3:
     st.markdown("**By month**")
     by_month = filtered.groupby(filtered["date_parsed"].dt.to_period("M"))["amount_num"].sum()
     st.dataframe(by_month.rename("Total"), width="stretch")
+
+
+# ---------- Tag review / audit (full width) ----------
+st.divider()
+with st.expander("Tag review / audit — inspect and correct tagged entries", expanded=False):
+    if not all_tag_names:
+        st.info("No tags defined yet.")
+    else:
+        # Overview: how many entries carry each tag. An unexpectedly high count
+        # can be a sign of accidental over-tagging from the earlier selection bug.
+        counts = {t: sum(1 for tags in st.session_state.entry_tags.values() if t in tags) for t in all_tag_names}
+        overview = pd.DataFrame({"tag": list(counts.keys()), "entries": list(counts.values())})
+        overview = overview.sort_values("entries", ascending=False)
+        st.markdown("**Entries per tag**")
+        st.dataframe(overview, hide_index=True, width="stretch")
+
+        review_tag = st.selectbox("Show all entries tagged", all_tag_names, key="review_tag_select")
+
+        multi_only = st.checkbox(
+            "Only show entries with multiple tags",
+            key="review_multi_only",
+            help="Useful for spotting entries that were tagged more than once.",
+        )
+
+        # Reset the review selection whenever the reviewed tag or filter changes.
+        review_sig = (review_tag, multi_only)
+        if st.session_state.last_review_tag != review_sig:
+            st.session_state.last_review_tag = review_sig
+            st.session_state.review_select_default = False
+            st.session_state.review_nonce += 1
+
+        tagged_ids = [
+            eid
+            for eid, tags in st.session_state.entry_tags.items()
+            if review_tag in tags and (not multi_only or len(tags) > 1)
+        ]
+        review_rows = df[df["entry_id"].isin(tagged_ids)].sort_values("date_parsed")
+
+        suffix = " with multiple tags" if multi_only else ""
+        st.caption(
+            f"{len(review_rows)} entr{'y' if len(review_rows) == 1 else 'ies'} tagged '{review_tag}'{suffix}"
+        )
+
+        if len(review_rows):
+            rbtn_col1, rbtn_col2 = st.columns(2)
+            with rbtn_col1:
+                if st.button("Select all viewed", key="review_select_all"):
+                    st.session_state.review_select_default = True
+                    st.session_state.review_nonce += 1
+                    st.rerun()
+            with rbtn_col2:
+                if st.button("Clear selection", key="review_clear"):
+                    st.session_state.review_select_default = False
+                    st.session_state.review_nonce += 1
+                    st.rerun()
+
+            review_df = review_rows[["entry_id", DATE_COL, NAME_COL, PURPOSE_COL, "amount_num"]].copy()
+            review_df.insert(0, "remove", st.session_state.review_select_default)
+            review_df["all tags"] = review_df["entry_id"].map(
+                lambda eid: ", ".join(st.session_state.entry_tags.get(eid, []))
+            )
+            review_df = review_df.rename(
+                columns={DATE_COL: "Date", NAME_COL: "Name", PURPOSE_COL: "Purpose", "amount_num": "Price"}
+            )
+
+            review_edited = st.data_editor(
+                review_df,
+                hide_index=True,
+                disabled=["Date", "Name", "Purpose", "Price", "all tags", "entry_id"],
+                column_config={
+                    "entry_id": None,
+                    "Price": st.column_config.NumberColumn(format="%.2f €"),
+                    "remove": st.column_config.CheckboxColumn(f"remove '{review_tag}'"),
+                },
+                key=f"review_editor_{st.session_state.review_nonce}",
+                width="stretch",
+            )
+
+            to_remove = review_edited.loc[review_edited["remove"], "entry_id"].tolist()
+            if st.button(f"Remove '{review_tag}' from selected", disabled=not to_remove):
+                for eid in to_remove:
+                    remaining = [t for t in st.session_state.entry_tags.get(eid, []) if t != review_tag]
+                    if remaining:
+                        st.session_state.entry_tags[eid] = remaining
+                    else:
+                        st.session_state.entry_tags.pop(eid, None)
+                save_entry_tags(st.session_state.entry_tags)
+                st.session_state.review_select_default = False
+                st.session_state.review_nonce += 1
+                st.success(
+                    f"Removed '{review_tag}' from {len(to_remove)} "
+                    f"entr{'y' if len(to_remove) == 1 else 'ies'}"
+                )
+                st.rerun()
+
+        st.divider()
+        st.markdown("**Delete a tag entirely**")
+        st.caption(
+            "Removes the selected tag from its definition and from every entry that carries it. "
+            "This cannot be undone."
+        )
+        confirm_delete = st.checkbox(
+            f"Yes, permanently delete '{review_tag}'", key="confirm_delete_tag"
+        )
+        if st.button(
+            f"Delete tag '{review_tag}' from all entries",
+            type="primary",
+            disabled=not confirm_delete,
+        ):
+            affected = 0
+            for eid in list(st.session_state.entry_tags.keys()):
+                remaining = [t for t in st.session_state.entry_tags[eid] if t != review_tag]
+                if len(remaining) != len(st.session_state.entry_tags[eid]):
+                    affected += 1
+                if remaining:
+                    st.session_state.entry_tags[eid] = remaining
+                else:
+                    st.session_state.entry_tags.pop(eid, None)
+            st.session_state.tag_defs.pop(review_tag, None)
+            save_entry_tags(st.session_state.entry_tags)
+            save_tag_defs(st.session_state.tag_defs)
+            st.session_state.review_select_default = False
+            st.session_state.last_review_tag = None
+            st.session_state.review_nonce += 1
+            st.success(
+                f"Deleted tag '{review_tag}' (removed from {affected} "
+                f"entr{'y' if affected == 1 else 'ies'})"
+            )
+            st.rerun()
