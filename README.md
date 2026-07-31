@@ -1,7 +1,7 @@
 # CategorizeExpenses
 
-An interactive local web app to browse, search, and tag expenses from a private
-bank-export CSV. Your financial data stays local: it's read from `data/` (gitignored)
+An interactive local web app to browse, search, and tag expenses from private
+bank-export CSVs. Your financial data stays local: it's read from `data/` (gitignored)
 and the app only ever listens on `127.0.0.1` — never on the network or internet.
 
 ## Requirements
@@ -12,10 +12,12 @@ and the app only ever listens on `127.0.0.1` — never on the network or interne
 ## Quick start
 
 ```bash
-# 1. Place your bank export CSV in the data/ directory
+# 1. Place your bank export CSVs in year-named subfolders under data/
 #    (data/ is gitignored – your data stays private)
-mkdir -p data
-cp /path/to/my_export.csv data/
+#    One CSV per year is expected; all years are combined automatically.
+mkdir -p data/2024 data/2025
+cp /path/to/export_2024.csv data/2024/
+cp /path/to/export_2025.csv data/2025/
 
 # 2. Create a virtual environment and install dependencies
 python3 -m venv .venv
@@ -43,8 +45,10 @@ with `--server.address` when running the app.
 
 ## Data & privacy
 
-- `data/` is entirely gitignored — your source CSV and all derived files stay local.
-- The app never modifies your source CSV. It only writes two files:
+- `data/` is entirely gitignored — your source CSVs and all derived files stay local.
+- Source CSVs live in year subfolders, e.g. `data/2024/export.csv`, `data/2025/export.csv`.
+  All CSVs found in these year folders are loaded and combined into one dataset.
+- The app never modifies your source CSVs. It only writes two files:
   - `data/tags.json` – tag name → color definitions
   - `data/tagged_entries.csv` – entry id → tags (the only file that changes as you work)
 - The app makes no external network calls and only binds to `127.0.0.1`.

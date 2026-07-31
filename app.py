@@ -41,18 +41,22 @@ st.set_page_config(page_title="Categorize Expenses", layout="wide")
 
 
 # ---------- Source file discovery ----------
-def find_source_csv() -> str | None:
-    """Locate the single bank-export CSV in data/, excluding our own private files."""
-    candidates = [
-        p
-        for p in glob.glob(os.path.join(DATA_DIR, "*.csv")) + glob.glob(os.path.join(DATA_DIR, "*.CSV"))
-        if os.path.basename(p) != os.path.basename(TAGGED_ENTRIES_PATH)
-    ]
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        return st.selectbox("Multiple CSV files found in data/ — choose one", sorted(candidates))
-    return None
+def find_source_csvs() -> list[str]:
+    """Locate bank-export CSVs organized in year subfolders, e.g. data/2024/, data/2025/.
+
+    Every CSV found in each numeric-named subfolder of data/ is treated as a
+    source file and combined into one dataset. Loose CSVs directly in data/
+    (not inside a year folder) are ignored so stray/duplicate downloads don't
+    get picked up by accident.
+    """
+    year_dirs = sorted(
+        d for d in glob.glob(os.path.join(DATA_DIR, "*")) if os.path.isdir(d) and os.path.basename(d).isdigit()
+    )
+    candidates = []
+    for year_dir in year_dirs:
+        candidates.extend(glob.glob(os.path.join(year_dir, "*.csv")))
+        candidates.extend(glob.glob(os.path.join(year_dir, "*.CSV")))
+    return sorted(set(candidates))
 
 
 # ---------- Data loading ----------
@@ -78,8 +82,10 @@ def make_entry_ids(df: pd.DataFrame) -> list[str]:
 
 
 @st.cache_data
-def load_source(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path, sep=";", encoding="latin-1", dtype=str)
+def load_source(paths: tuple[str, ...]) -> pd.DataFrame:
+    """Load and combine one or more bank-export CSVs (one per year folder)."""
+    frames = [pd.read_csv(path, sep=";", encoding="latin-1", dtype=str) for path in paths]
+    df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
     df["entry_id"] = make_entry_ids(df)
     df["amount_num"] = (
         df[AMOUNT_COL].fillna("0").str.replace(".", "", regex=False).str.replace(",", ".", regex=False).astype(float)
@@ -140,9 +146,12 @@ def tag_badges_html(tag_names: list[str], tag_defs: dict) -> str:
 
 
 # ---------- App ----------
-source_path = find_source_csv()
-if not source_path:
-    st.error(f"No source CSV found in `{DATA_DIR}/`. Place your bank export CSV there and reload.")
+source_paths = find_source_csvs()
+if not source_paths:
+    st.error(
+        f"No source CSVs found under `{DATA_DIR}/<year>/`. "
+        f"Place your bank export CSVs in year-named subfolders (e.g. `{DATA_DIR}/2024/`, `{DATA_DIR}/2025/`) and reload."
+    )
     st.stop()
 
 if "tag_defs" not in st.session_state:
@@ -162,7 +171,7 @@ if "last_review_tag" not in st.session_state:
 if "review_select_default" not in st.session_state:
     st.session_state.review_select_default = False
 
-df = load_source(source_path)
+df = load_source(tuple(source_paths))
 
 st.title("Categorize Expenses")
 
@@ -172,6 +181,10 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col1:
     st.subheader("Filter")
     all_tag_names = sorted(st.session_state.tag_defs.keys())
+
+    available_years = sorted(df["date_parsed"].dt.year.dropna().unique().astype(int).tolist())
+    year_choice = st.selectbox("Year", ["All years"] + [str(y) for y in available_years])
+
     view_mode = st.radio("View", ["All entries", "No tags"], index=0)
     selected_tag_filter = st.multiselect("Filter by tag(s)", all_tag_names)
 
@@ -188,6 +201,9 @@ def matches_filter(entry_id: str) -> bool:
         return any(t in tags for t in selected_tag_filter)
     return True
 
+
+if year_choice != "All years":
+    df = df[df["date_parsed"].dt.year == int(year_choice)]
 
 filtered = df[df["entry_id"].apply(matches_filter)]
 
@@ -220,7 +236,7 @@ with col2:
     # Selection is scoped to the current view. Whenever the view changes
     # (tag filter, no-tag mode, search text, or sort), reset the selection so
     # stale rows from a previous search can never be tagged by accident.
-    view_sig = (view_mode, tuple(sorted(selected_tag_filter)), query, sort_by, ascending)
+    view_sig = (year_choice, view_mode, tuple(sorted(selected_tag_filter)), query, sort_by, ascending)
     if view_sig != st.session_state.last_view_sig:
         st.session_state.last_view_sig = view_sig
         st.session_state.select_default = False
